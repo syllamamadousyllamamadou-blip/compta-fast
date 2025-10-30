@@ -66,17 +66,125 @@ const generatePDF = (year, month) => {
     doc.save(`Bilan_${period.replace(/\s/g, '_')}.pdf`);
 };
 
-// --- INITIALISATION ---
-document.addEventListener('DOMContentLoaded', async () => {
-    
-    // --- CHARGEMENT INITIAL DES DONNÉES ---
-    await loadData();
-    renderAll();
-    DOM.loadingOverlay.classList.add('hidden');
-    
-    // --- GESTION DES ÉVÉNEMENTS ---
+// --- NOUVEAU : FONCTION DE DÉMARRAGE ("Chef d'orchestre") ---
+async function initializeApp() {
+    // 1. Vérifier si l'utilisateur est déjà connecté
+    const { data: { session } } = await supabaseClient.auth.getSession();
 
-    // Navigation (Inchangé)
+    if (session) {
+        // === UTILISATEUR EST CONNECTÉ ===
+        
+        // Affiche son email dans la section "Exporter"
+        const userEmailDisplay = document.getElementById('user-email-display');
+        if(userEmailDisplay) userEmailDisplay.textContent = session.user.email;
+
+        // Charge ses données (MAINTENANT, c'est sécurisé)
+        await loadData();
+        
+        // Affiche l'application
+        renderAll();
+        
+        // Cache l'authentification et le chargement, montre l'app
+        DOM.authContainer.classList.add('hidden');
+        DOM.appContainer.classList.remove('hidden');
+        DOM.loadingOverlay.classList.add('hidden');
+        
+    } else {
+        // === UTILISATEUR N'EST PAS CONNECTÉ ===
+        
+        // Cache l'application et le chargement, montre l'authentification
+        DOM.authContainer.classList.remove('hidden');
+        DOM.appContainer.classList.add('hidden');
+        DOM.loadingOverlay.classList.add('hidden');
+    }
+}
+
+
+// --- INITIALISATION (MODIFIÉ) ---
+document.addEventListener('DOMContentLoaded', () => {
+    
+    // --- NOUVEAU : GESTIONNAIRES D'ÉVÉNEMENTS D'AUTHENTIFICATION ---
+    
+    // Onglets Connexion / Inscription
+    const tabLogin = document.getElementById('tab-login');
+    const tabSignup = document.getElementById('tab-signup');
+    const pageLogin = document.getElementById('page-login');
+    const pageSignup = document.getElementById('page-signup');
+
+    tabLogin.addEventListener('click', () => {
+        tabLogin.classList.add('active');
+        tabSignup.classList.remove('active');
+        pageLogin.classList.add('active');
+        pageSignup.classList.remove('active');
+    });
+
+    tabSignup.addEventListener('click', () => {
+        tabSignup.classList.add('active');
+        tabLogin.classList.remove('active');
+        pageSignup.classList.add('active');
+        pageLogin.classList.remove('active');
+    });
+
+    // Formulaire de Connexion
+    DOM.loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        DOM.loadingOverlay.classList.remove('hidden'); // Montrer le loader
+        const formData = new FormData(DOM.loginForm);
+        const email = formData.get('email');
+        const password = formData.get('password');
+
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+        if (error) {
+            DOM.loginError.textContent = "Email ou mot de passe incorrect.";
+            DOM.loginError.classList.remove('hidden');
+            DOM.loadingOverlay.classList.add('hidden'); // Cacher le loader
+        } else {
+            DOM.loginError.classList.add('hidden');
+            // La connexion a réussi, on lance l'application
+            await initializeApp(); 
+        }
+    });
+
+    // Formulaire d'Inscription
+    DOM.signupForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        DOM.loadingOverlay.classList.remove('hidden'); // Montrer le loader
+        const formData = new FormData(DOM.signupForm);
+        const email = formData.get('email');
+        const password = formData.get('password');
+
+        const { error } = await supabaseClient.auth.signUp({ email, password });
+
+        if (error) {
+            DOM.signupError.textContent = error.message;
+            DOM.signupError.classList.remove('hidden');
+            DOM.loadingOverlay.classList.add('hidden'); // Cacher le loader
+        } else {
+            DOM.signupError.classList.add('hidden');
+            // L'inscription a réussi, on informe l'utilisateur
+            pageLogin.innerHTML = `<p class="text-green-600 p-4 text-center">Inscription réussie ! Veuillez vérifier votre boîte mail pour confirmer votre compte avant de vous connecter.</p>`;
+            // On bascule sur l'onglet de connexion
+            tabLogin.click();
+            DOM.loadingOverlay.classList.add('hidden'); // Cacher le loader
+        }
+    });
+
+    // Bouton de Déconnexion
+    const logoutBtn = document.getElementById('logout-btn');
+    logoutBtn.addEventListener('click', async () => {
+        DOM.loadingOverlay.classList.remove('hidden');
+        await supabaseClient.auth.signOut();
+        // Recharge la page (ce qui relancera initializeApp et affichera l'écran de connexion)
+        window.location.reload(); 
+    });
+
+
+    // --- GESTION DES ÉVÉNEMENTS DE L'APPLICATION (Ton code existant) ---
+    // (Cette section est identique à ton fichier, elle est juste placée
+    // après les écouteurs d'authentification)
+
+    // Navigation
     DOM.navItems.forEach(item => {
         item.addEventListener('click', () => {
             const pageId = item.dataset.page;
@@ -86,7 +194,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
-    // Modale de Transaction (Inchangé)
+    // Modale de Transaction
     DOM.showTransactionModalBtn.addEventListener('click', () => {
         closeModal(DOM.settleDebtModal);
         closeModal(DOM.settingsModal);
@@ -327,7 +435,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        // --- GESTION SUPPRESSION TRANSACTION (Corrigé) ---
+        // --- GESTION SUPPRESSION TRANSACTION (Inchangé) ---
         if (deleteBtn) {
             const txId = deleteBtn.dataset.id;
             const txToDelete = db.transactions.find(t => t.id === txId);
@@ -338,7 +446,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 message: `Êtes-vous sûr de vouloir supprimer cette transaction ? (${txToDelete.description || txToDelete.type} - ${txToDelete.montant} F). Cette action est irréversible.`,
                 buttons: [
                     { text: 'Annuler', classes: 'px-4 py-2 bg-gray-200 rounded-md', onClick: () => {} },
-                    // *** ERREUR CORRIGÉE : 'async onClick: async ()' est devenu 'onClick: async ()' ***
                     { text: 'Supprimer', classes: 'px-4 py-2 bg-red-500 text-white rounded-md', onClick: async () => {
                         revertStockChange(txToDelete);
                         
@@ -433,7 +540,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         transaction.portefeuille_details = updates.portefeuille_details;
         
         renderAll(); 
-        closeSettleModal(); 
+        // Note: 'closeSettleModal' n'est pas défini dans ton code, 
+        // j'utilise closeModal sur la modale de dette
+        closeModal(DOM.settleDebtModal); 
         showSyncIndicator();
     });
 
@@ -502,7 +611,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             contentHtml: `<input type="text" id="${inputId}" class="w-full p-2 border rounded-md bg-gray-50" value="${oldName}">`,
             buttons: [
                 { text: 'Annuler', classes: 'px-4 py-2 bg-gray-200 rounded-md', onClick: () => {} },
-                // *** ERREUR CORRIGÉE : 'B =>' est supprimé ***
                 { text: 'Enregistrer', classes: 'px-4 py-2 bg-indigo-600 text-white rounded-md', onClick: () => { 
                     const newName = document.getElementById(inputId).value.trim();
                     if (newName && newName !== oldName) {
@@ -599,5 +707,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentDisplayDate.setMonth(currentDisplayDate.getMonth() + 1);
         renderDashboard();
     });
+
+    // --- NOUVEAU : DÉMARRAGE DE L'APPLICATION ---
+    // On appelle le "chef d'orchestre" à la fin,
+    // après que tous les écouteurs soient prêts.
+    initializeApp();
     
 });
